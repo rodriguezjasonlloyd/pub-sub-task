@@ -12,3 +12,6 @@ dependencies = [
   "redis>=7.1.0",
   "structlog>=25.5.0",
 ]
+
+[tool.ruff]
+line-length = 100
