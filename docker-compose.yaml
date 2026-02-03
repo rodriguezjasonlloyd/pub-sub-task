@@ -1,0 +1,82 @@
+services:
+  # Redis - Queue Service
+  redis:
+    image: redis:alpine
+    container_name: article-pipeline-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - pipeline-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # MongoDB - Database Service
+  mongodb:
+    image: mongo:noble
+    container_name: article-pipeline-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: article_pipeline
+    volumes:
+      - mongodb-data:/data/db
+    networks:
+      - pipeline-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Publisher - Runs once to push tasks
+  publisher:
+    build:
+      context: .
+      dockerfile: src/publisher/Dockerfile
+    container_name: article-pipeline-publisher
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      LOG_LEVEL: INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - pipeline-network
+    restart: "no"
+
+  # Consumer - Runs continuously to process tasks
+  consumer:
+    build:
+      context: .
+      dockerfile: src/consumer/Dockerfile
+    container_name: article-pipeline-consumer
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      MONGODB_URI: mongodb://mongodb:27017/article_pipeline
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+      LOG_LEVEL: INFO
+      MAX_RETRIES: 3
+      RETRY_BACKOFF_BASE: 1
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    networks:
+      - pipeline-network
+    restart: unless-stopped
+
+networks:
+  pipeline-network:
+    driver: bridge
+
+volumes:
+  mongodb-data:
+    driver: local
