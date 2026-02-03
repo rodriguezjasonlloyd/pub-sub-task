@@ -22,3 +22,6 @@ packages = ["src/shared", "src/publisher", "src/consumer"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.rumdl.MD013]
+line_length = 200
