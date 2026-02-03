@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field, HttpUrl
@@ -22,7 +22,7 @@ class ScrapedContent(BaseModel):
     author: str | None = Field(None)
     published_date: str | None = Field(None)
     http_status: int = Field(...)
-    scraped_at: datetime = Field(default_factory=datetime.utcnow)
+    scraped_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ArticleDocument(BaseModel):

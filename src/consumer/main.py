@@ -2,7 +2,7 @@ import json
 import signal
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 from pymongo import MongoClient
@@ -112,7 +112,7 @@ def send_discord_webhook(
                         "inline": True,
                     },
                 ],
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         else:
             embed = {
@@ -129,7 +129,7 @@ def send_discord_webhook(
                         "inline": False,
                     },
                 ],
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
         payload = {"embeds": [embed]}
@@ -177,32 +177,22 @@ def store_article(
     collection = db["articles"]
 
     # Build document
-    document_data = {
-        "_id": article_task.id,
-        "url": str(article_task.url),
-        "source": article_task.source,
-        "category": article_task.category,
-        "priority": article_task.priority,
-        "status": status,
-        "attempts": attempts,
-        "error_message": error_message,
-    }
-
-    # Add scraped content if available
-    if scraped_content:
-        document_data.update(
-            {
-                "title": scraped_content.title,
-                "meta_description": scraped_content.meta_description,
-                "author": scraped_content.author,
-                "published_date": scraped_content.published_date,
-                "http_status": scraped_content.http_status,
-                "scraped_at": scraped_content.scraped_at,
-            }
-        )
-
-    # Validate with Pydantic
-    article_doc = ArticleDocument(**document_data)
+    article_doc = ArticleDocument(
+        _id=article_task.id,
+        url=str(article_task.url),
+        source=article_task.source,
+        category=article_task.category,
+        priority=article_task.priority,
+        status=status,
+        attempts=attempts,
+        error_message=error_message,
+        title=scraped_content.title if scraped_content else None,
+        meta_description=scraped_content.meta_description if scraped_content else None,
+        author=scraped_content.author if scraped_content else None,
+        published_date=scraped_content.published_date if scraped_content else None,
+        http_status=scraped_content.http_status if scraped_content else None,
+        scraped_at=scraped_content.scraped_at if scraped_content else None,
+    )
 
     try:
         # Insert or update
@@ -376,22 +366,23 @@ def consume_tasks() -> None:
     while not shutdown_flag:
         try:
             # Block and wait for task (timeout 1 second for responsiveness)
-            result = redis_client.brpop(settings.queue_name, timeout=1)
+            result = redis_client.brpop([settings.queue_name], timeout=1)
 
             if result is None:
                 continue
 
-            # Extract task data
-            _, task_data = result
+            if isinstance(result, (list, tuple)):
+                # Extract task data
+                _, task_data = result
 
-            # Process the task
-            process_task(
-                redis_client=redis_client,
-                mongo_client=mongo_client,
-                scraper=scraper,
-                task_data=task_data,
-                webhook_url=str(settings.discord_webhook_url),
-            )
+                # Process the task
+                process_task(
+                    redis_client=redis_client,
+                    mongo_client=mongo_client,
+                    scraper=scraper,
+                    task_data=task_data,
+                    webhook_url=str(settings.discord_webhook_url),
+                )
 
         except KeyboardInterrupt:
             logger.info("keyboard_interrupt_received")

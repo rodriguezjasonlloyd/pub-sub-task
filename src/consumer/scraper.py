@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from httpx import HTTPStatusError, RequestError
 
 from shared.logger import get_logger
@@ -28,6 +28,18 @@ class ArticleScraper:
                 "Chrome/120.0.0.0 Safari/537.36"
             )
         }
+
+    def _get_clean_attr(self, tag: Tag, attr: str) -> str | None:
+        """Helper to handle BeautifulSoup multi-valued attributes and stripping."""
+
+        val = tag.get(attr)
+
+        if val is None:
+            return None
+        if isinstance(val, list):
+            return " ".join(val).strip()
+
+        return str(val).strip()
 
     def scrape(self, url: str, article_id: str) -> ScrapedContent:
         """
@@ -74,7 +86,7 @@ class ArticleScraper:
                 author=author,
                 published_date=published_date,
                 http_status=response.status_code,
-                scraped_at=datetime.utcnow(),
+                scraped_at=datetime.now(timezone.utc),
             )
 
             logger.info(
@@ -128,13 +140,19 @@ class ArticleScraper:
         """
         # Try Open Graph title
         og_title = soup.find("meta", property="og:title")
-        if og_title and og_title.get("content"):
-            return og_title["content"].strip()
+        if isinstance(og_title, Tag):
+            title = self._get_clean_attr(og_title, "content")
+
+            if title:
+                return title
 
         # Try Twitter title
         twitter_title = soup.find("meta", attrs={"name": "twitter:title"})
         if twitter_title and twitter_title.get("content"):
-            return twitter_title["content"].strip()
+            title = self._get_clean_attr(twitter_title, "content")
+
+            if title:
+                return title
 
         # Try h1 tag
         h1 = soup.find("h1")
@@ -168,12 +186,18 @@ class ArticleScraper:
         # Try standard meta description
         meta_desc = soup.find("meta", attrs={"name": "description"})
         if meta_desc and meta_desc.get("content"):
-            return meta_desc["content"].strip()
+            desc = self._get_clean_attr(meta_desc, "content")
+
+            if desc:
+                return desc
 
         # Try Open Graph description
         og_desc = soup.find("meta", property="og:description")
         if og_desc and og_desc.get("content"):
-            return og_desc["content"].strip()
+            desc = self._get_clean_attr(og_desc, "content")
+
+            if desc:
+                return desc
 
         logger.debug("meta_description_not_found", article_id=article_id)
 
@@ -198,27 +222,31 @@ class ArticleScraper:
         # Try meta author tag
         meta_author = soup.find("meta", attrs={"name": "author"})
         if meta_author and meta_author.get("content"):
-            return meta_author["content"].strip()
+            author = self._get_clean_attr(meta_author, "content")
+
+            if author:
+                return author
 
         # Try article:author
         article_author = soup.find("meta", property="article:author")
         if article_author and article_author.get("content"):
-            return article_author["content"].strip()
+            author = self._get_clean_attr(article_author, "content")
+
+            if author:
+                return author
 
         # Try common author patterns
-        author_patterns = [
-            {"class_": "author"},
-            {"class_": "author-name"},
-            {"itemprop": "author"},
-            {"rel": "author"},
-        ]
+        author_tag = (
+            soup.find(class_="author")
+            or soup.find(class_="author-name")
+            or soup.find(itemprop="author")
+            or soup.find(rel="author")
+        )
 
-        for pattern in author_patterns:
-            author_tag = soup.find(attrs=pattern)
-            if author_tag:
-                author_text = author_tag.get_text(strip=True)
-                if author_text:
-                    return author_text
+        if author_tag:
+            author_text = author_tag.get_text(strip=True)
+            if author_text:
+                return author_text
 
         logger.debug("author_not_found", article_id=article_id)
 
@@ -243,27 +271,31 @@ class ArticleScraper:
         # Try article:published_time
         published_time = soup.find("meta", property="article:published_time")
         if published_time and published_time.get("content"):
-            return published_time["content"].strip()
+            time = self._get_clean_attr(published_time, "content")
+
+            if time:
+                return time
 
         # Try time tag with datetime
         time_tag = soup.find("time", attrs={"datetime": True})
         if time_tag:
-            return time_tag["datetime"].strip()
+            time = self._get_clean_attr(time_tag, "content")
+
+            if time:
+                return time
 
         # Try common date patterns
-        date_patterns = [
-            {"class_": "published"},
-            {"class_": "date"},
-            {"class_": "post-date"},
-            {"itemprop": "datePublished"},
-        ]
+        date_tag = (
+            soup.find(class_="published")
+            or soup.find(class_="date")
+            or soup.find(class_="post-date")
+            or soup.find(itemprop="datePublished")
+        )
 
-        for pattern in date_patterns:
-            date_tag = soup.find(attrs=pattern)
-            if date_tag:
-                date_text = date_tag.get_text(strip=True)
-                if date_text:
-                    return date_text
+        if date_tag:
+            date_text = date_tag.get_text(strip=True)
+            if date_text:
+                return date_text
 
         logger.debug("published_date_not_found", article_id=article_id)
 
